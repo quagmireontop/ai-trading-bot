@@ -7,6 +7,7 @@ import * as broker from './broker.js';
 import { getNews } from './news.js';
 import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, runBotCycle } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
+import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
 
 const SOURCE = 'claude-mcp';
 const ok = (data) => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] });
@@ -119,6 +120,33 @@ export function createMcpServer() {
     title: 'Run bot once', description: 'Runs one bot cycle now: computes signals and, if the market is open, places paper orders within the safety limits.',
     inputSchema: {},
   }, wrap(() => runBotCycle(SOURCE)));
+
+  server.registerTool('list_backtest_strategies', {
+    title: 'Backtest strategies', description: 'Lists the strategies that can be backtested, with their parameters, defaults and allowed ranges.', inputSchema: {}, annotations: readOnly,
+  }, wrap(() => listStrategies()));
+
+  server.registerTool('run_backtest', {
+    title: 'Backtest a strategy',
+    description: 'Backtests one strategy on one symbol over daily price history (long-only, trades at next day\'s open, fees included) and compares it with buy-and-hold. Returns total/annual return, max drawdown, Sharpe, win rate and trades. Past results do not predict future returns; news sentiment is not part of backtests.',
+    inputSchema: {
+      symbol: z.string(),
+      strategy: z.enum(['sma_crossover', 'rsi', 'momentum', 'breakout']).default('sma_crossover'),
+      params: z.record(z.string(), z.number()).optional().describe('Strategy parameters, e.g. {"fast": 10, "slow": 30}. Omit for defaults.'),
+      days: z.number().int().min(60).max(2500).default(500).describe('Trading days of history (252 ≈ 1 year)'),
+      capital: z.number().positive().default(10000),
+      fee_bps: z.number().min(0).max(100).default(5).describe('Cost per trade in basis points'),
+    },
+    annotations: readOnly,
+  }, wrap(async ({ symbol, strategy, params, days, capital, fee_bps }) => {
+    const r = await runBacktest({ symbol, strategy, params, days, capital, feeBps: fee_bps });
+    const { curve, ...rest } = r; // keep the response compact for Claude
+    return { ...rest, trades: rest.trades.slice(-10) };
+  }));
+
+  server.registerTool('compare_strategies', {
+    title: 'Compare strategies', description: 'Backtests every strategy with default settings on one symbol and ranks them against buy-and-hold.',
+    inputSchema: { symbol: z.string(), days: z.number().int().min(60).max(2500).default(500) }, annotations: readOnly,
+  }, wrap(({ symbol, days }) => compareStrategies({ symbol, days })));
 
   server.registerTool('get_activity', {
     title: 'Activity log', description: 'Recent activity from the website, the bot and Claude (orders, bot runs, toggles).',

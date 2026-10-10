@@ -80,6 +80,29 @@
         <ul id="activity" class="activity"></ul>
       </section>
 
+      <section class="card span3" id="backtest">
+        <div class="card-head"><h2>Backtest a strategy</h2><span class="muted small">Daily prices · long only · trades at next day's open · 0.05% cost per trade</span></div>
+        <form id="btForm" class="bt-form">
+          <label>Symbol<input name="symbol" value="SPY" required autocomplete="off"></label>
+          <label>Strategy<select name="strategy" id="btStrategy"></select></label>
+          <div id="btParams" class="bt-params"></div>
+          <label>Period<select name="days"><option value="126">6 months</option><option value="252">1 year</option><option value="504" selected>2 years</option><option value="1260">5 years</option></select></label>
+          <label>Starting $<input name="capital" type="number" min="100" step="100" value="10000"></label>
+          <div class="bt-actions"><button type="submit">Run backtest</button><button type="button" id="btCompare" class="ghost">Compare all strategies</button></div>
+        </form>
+        <p id="btDesc" class="muted small"></p>
+        <div id="btMsg" class="small"></div>
+        <div id="btResult" hidden>
+          <div class="bt-kpis" id="btKpis"></div>
+          <div class="bt-legend small"><span><i class="sw strat"></i>Strategy</span><span><i class="sw bh"></i>Buy and hold</span></div>
+          <div id="btChart" class="bt-chart"></div>
+          <h3>Recent trades</h3>
+          <div class="table-wrap"><table id="btTrades"><thead><tr><th>Bought</th><th>Sold</th><th class="num">Buy price</th><th class="num">Sell price</th><th class="num">Return</th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div id="btCompareResult" class="table-wrap" hidden></div>
+        <p class="muted small">Past results don't predict future returns. News sentiment isn't included because historical sentiment isn't available.</p>
+      </section>
+
       <section class="card span2">
         <div class="card-head">
           <h2>Latest news</h2>

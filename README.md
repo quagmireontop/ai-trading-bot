@@ -35,7 +35,7 @@ npm test                    # runs the test suite offline
 The MCP server exposes these tools: `get_account`, `get_positions`, `get_orders`,
 `get_quote`, `get_price_history`, `get_news`, `get_market_trends`, `analyze_stock`,
 `get_trade_signals`, `place_order`, `cancel_order`, `get_bot_status`, `set_bot_enabled`,
-`run_bot_cycle`, `get_activity`.
+`run_bot_cycle`, `get_activity`, `list_backtest_strategies`, `run_backtest`, `compare_strategies`.
 
 **Claude Code / Claude Desktop on your computer (stdio):**
 
@@ -91,6 +91,23 @@ Headlines are cached for 5 minutes.
 
 This is a transparent heuristic, not a prediction model. Claude can do deeper reasoning on
 top of it through the tools.
+
+## Backtesting
+
+The **Backtest a strategy** panel (and Claude's `run_backtest` / `compare_strategies` tools)
+replay a strategy over up to ~10 years of daily prices and compare it with buy-and-hold:
+
+| Strategy | Rule |
+| --- | --- |
+| Moving-average crossover | Hold while the fast average is above the slow one |
+| RSI mean reversion | Buy below the oversold level, sell above the overbought level |
+| Momentum | Hold while the price is up more than X% over the lookback |
+| Breakout | Buy on a new N-day high, sell on a new M-day low |
+
+Trades happen at the next day's open (no peeking ahead), long only, with a 0.05% cost per
+trade. Results show return, worst drop, Sharpe, win rate and every trade. News sentiment
+isn't included because historical sentiment data isn't available. Past results don't
+predict future returns.
 
 ## Autonomous bot and safety limits
 

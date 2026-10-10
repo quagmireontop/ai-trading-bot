@@ -9,6 +9,7 @@ import { getNews } from './news.js';
 import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, runBotCycle, startScheduler } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
 import { createMcpServer } from './tools.js';
+import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
 import { loginEnabled, requireAuth, requirePageAuth, handleLogin, handleLogout, mcpAllowed } from './auth.js';
 
 export const app = express();
@@ -45,6 +46,9 @@ api.get('/trends', route(() => getTrends()));
 api.get('/signals', route(() => getSignals()));
 api.get('/analyze/:symbol', route((r) => analyzeSymbol(r.params.symbol)));
 api.get('/activity', route(() => getActivity(50)));
+api.get('/backtest/strategies', route(() => listStrategies()));
+api.post('/backtest', route((r) => runBacktest(r.body)));
+api.post('/backtest/compare', route((r) => compareStrategies(r.body)));
 api.post('/orders', route(async (r) => {
   const { symbol, side, qty, notional, type, limitPrice } = r.body;
   const order = await broker.placeOrder({ symbol, side, qty: qty && Number(qty), notional: notional && Number(notional), type, limitPrice: limitPrice && Number(limitPrice) });

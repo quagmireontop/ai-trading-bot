@@ -108,8 +108,14 @@ export async function getBars(symbol, days = 30) {
   symbol = symbol.toUpperCase();
   if (!demoMode) {
     const start = new Date(Date.now() - (days * 1.6 + 5) * 86400000).toISOString().slice(0, 10);
-    const r = await market(`/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Day&start=${start}&limit=1000&feed=iex&adjustment=split`);
-    return (r.bars || []).slice(-days);
+    const bars = [];
+    let token = '';
+    do { // Alpaca pages results 1000 bars at a time, oldest first
+      const r = await market(`/v2/stocks/${encodeURIComponent(symbol)}/bars?timeframe=1Day&start=${start}&limit=1000&feed=iex&adjustment=split${token ? `&page_token=${token}` : ''}`);
+      bars.push(...(r.bars || []));
+      token = r.next_page_token || '';
+    } while (token);
+    return bars.slice(-days);
   }
   return demoBars(symbol, days);
 }

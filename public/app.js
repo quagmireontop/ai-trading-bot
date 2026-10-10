@@ -208,6 +208,93 @@ document.querySelectorAll('input[name=cat]').forEach((r) => r.addEventListener('
 $('#newsSearch').addEventListener('input', () => { clearTimeout(newsTimer); newsTimer = setTimeout(loadNews, 300); });
 
 
+
+// ---------- Backtesting ----------
+let strategies = [];
+async function loadStrategies() {
+  strategies = await api('/backtest/strategies');
+  $('#btStrategy').innerHTML = strategies.map((st) => `<option value="${esc(st.key)}">${esc(st.name)}</option>`).join('');
+  renderParams();
+}
+function renderParams() {
+  const st = strategies.find((x) => x.key === $('#btStrategy').value);
+  if (!st) return;
+  $('#btDesc').textContent = st.description;
+  $('#btParams').innerHTML = Object.entries(st.params).map(([k, p]) => `
+    <label>${esc(k[0].toUpperCase() + k.slice(1))}<input name="p_${esc(k)}" type="number" value="${p.default}" min="${p.min}" max="${p.max}" step="any"></label>`).join('');
+}
+$('#btStrategy').addEventListener('change', renderParams);
+
+function btChart(curve, capital) {
+  const W = Math.max(300, $('#btChart').clientWidth || 800), H = 240, L = 56, R = 8, T = 10, B = 24;
+  const vals = curve.flatMap((p) => [p.strategy, p.buyAndHold]);
+  let min = Math.min(...vals, capital), max = Math.max(...vals, capital);
+  const pad = (max - min) * 0.05 || 1; min -= pad; max += pad;
+  const x = (i) => L + (i / (curve.length - 1)) * (W - L - R);
+  const y = (v) => T + (1 - (v - min) / (max - min)) * (H - T - B);
+  const line = (key) => curve.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
+  const ticks = [min + pad, capital, max - pad].filter((v, i, a) => a.findIndex((w) => Math.abs(w - v) < (max - min) * 0.08) === i);
+  const fmt = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`);
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Equity curve: strategy versus buy and hold">
+    ${ticks.map((v) => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`).join('')}
+    <text x="${L}" y="${H - 6}">${esc(curve[0].t)}</text><text x="${W - R}" y="${H - 6}" text-anchor="end">${esc(curve.at(-1).t)}</text>
+    <path class="bh" d="${line('buyAndHold')}" fill="none" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    <path class="strat" d="${line('strategy')}" fill="none" stroke-width="2" vector-effect="non-scaling-stroke"/>
+  </svg>`;
+}
+
+function btForm() {
+  const f = $('#btForm');
+  const params = {};
+  f.querySelectorAll('[name^=p_]').forEach((el) => { params[el.name.slice(2)] = Number(el.value); });
+  return { symbol: f.symbol.value.trim().toUpperCase(), strategy: f.strategy.value, params, days: Number(f.days.value), capital: Number(f.capital.value) };
+}
+
+$('#btForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled = true; $('#btMsg').textContent = 'Running…'; $('#btCompareResult').hidden = true;
+  try {
+    const r = await api('/backtest', { method: 'POST', body: btForm() });
+    const res = r.result, bh = r.buyAndHold;
+    const beat = res.totalReturnPct - bh.totalReturnPct;
+    $('#btMsg').innerHTML = `<strong>${esc(r.symbol)}</strong> · ${esc(r.strategyName)} · ${esc(r.from)} to ${esc(r.to)}: <span class="${cls(beat)}">${beat >= 0 ? 'beat' : 'trailed'} buy and hold by ${Math.abs(beat).toFixed(1)} points</span>`;
+    const kpi = (label, v, sub) => `<div><span>${label}</span><strong>${v}</strong>${sub ? ` <small>${sub}</small>` : ''}</div>`;
+    $('#btKpis').innerHTML = [
+      kpi('Strategy return', `<span class="${cls(res.totalReturnPct)}">${pct(res.totalReturnPct)}</span>`, `ends ${usd(res.endingValue)}`),
+      kpi('Buy and hold', `<span class="${cls(bh.totalReturnPct)}">${pct(bh.totalReturnPct)}</span>`, `ends ${usd(bh.endingValue)}`),
+      kpi('Worst drop', `<span class="neg">-${res.maxDrawdownPct.toFixed(1)}%</span>`, `vs -${bh.maxDrawdownPct.toFixed(1)}%`),
+      kpi('Trades', res.trades, res.winRatePct != null ? `${res.winRatePct}% winners` : ''),
+      kpi('Sharpe', res.sharpe ?? '–', `vs ${bh.sharpe ?? '–'}`),
+      kpi('Time invested', `${res.timeInMarketPct}%`),
+    ].join('');
+    $('#btResult').hidden = false;
+    $('#btChart').innerHTML = btChart(r.curve, r.capital);
+    const rows = [...r.trades].reverse().slice(0, 10);
+    if (r.openTrade) rows.unshift({ entryDate: r.openTrade.entryDate, exitDate: 'still open', entryPrice: r.openTrade.entryPrice, exitPrice: null, returnPct: r.openTrade.returnPct });
+    $('#btTrades tbody').innerHTML = rows.length ? rows.map((t) => `<tr><td>${esc(t.entryDate)}</td><td>${esc(t.exitDate)}</td><td class="num">${usd(t.entryPrice)}</td><td class="num">${t.exitPrice != null ? usd(t.exitPrice) : '–'}</td><td class="num ${cls(t.returnPct)}">${pct(t.returnPct)}</td></tr>`).join('') : emptyRow(5, 'No trades in this period');
+    $('#btResult').hidden = false;
+  } catch (err) {
+    $('#btMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+  } finally { btn.disabled = false; }
+});
+
+$('#btCompare').addEventListener('click', async (e) => {
+  e.target.disabled = true; $('#btMsg').textContent = 'Comparing…'; $('#btResult').hidden = true;
+  try {
+    const { symbol, days, capital } = btForm();
+    const c = await api('/backtest/compare', { method: 'POST', body: { symbol, days, capital } });
+    $('#btMsg').innerHTML = `<strong>${esc(c.symbol)}</strong> · default settings · ${esc(c.from)} to ${esc(c.to)}`;
+    $('#btCompareResult').innerHTML = `<table><thead><tr><th>Strategy</th><th class="num">Return</th><th class="num">vs buy and hold</th><th class="num">Worst drop</th><th class="num">Trades</th><th class="num">Sharpe</th></tr></thead><tbody>
+      ${c.strategies.map((s) => `<tr><td>${esc(s.name)}</td><td class="num ${cls(s.totalReturnPct)}">${pct(s.totalReturnPct)}</td><td class="num ${cls(s.totalReturnPct - c.buyAndHold.totalReturnPct)}">${pct(s.totalReturnPct - c.buyAndHold.totalReturnPct).replace('%', ' pts')}</td><td class="num">-${s.maxDrawdownPct.toFixed(1)}%</td><td class="num">${s.trades}</td><td class="num">${s.sharpe ?? '–'}</td></tr>`).join('')}
+      <tr><td class="muted">Buy and hold</td><td class="num ${cls(c.buyAndHold.totalReturnPct)}">${pct(c.buyAndHold.totalReturnPct)}</td><td class="num">–</td><td class="num">-${c.buyAndHold.maxDrawdownPct.toFixed(1)}%</td><td class="num">1</td><td class="num">${c.buyAndHold.sharpe ?? '–'}</td></tr>
+    </tbody></table>`;
+    $('#btCompareResult').hidden = false;
+  } catch (err) {
+    $('#btMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+  } finally { e.target.disabled = false; }
+});
+
 $('#mcpUrl').onclick = () => navigator.clipboard?.writeText($('#mcpUrl').textContent);
 const safe = (fn) => fn().catch((e) => console.error(e));
 function refreshPortfolio() {
@@ -223,5 +310,6 @@ function refreshNews() { safe(loadTrends); safe(loadNews); safe(loadSignals); }
 
 refreshPortfolio();
 refreshNews();
+safe(loadStrategies);
 setInterval(refreshPortfolio, 30000);
 setInterval(refreshNews, 5 * 60000);
