@@ -32,7 +32,9 @@ async function loadStatus() {
   const s = await api('/status');
   $('#logout').hidden = !s.loginEnabled;
   if (s.mcpUrl) { $('#remoteMcp').hidden = false; $('#mcpUrl').textContent = s.mcpUrl; }
-  $('#localMcp').hidden = !!s.mcpUrl;
+  const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  $('#localMcp').hidden = !!s.mcpUrl || !isLocal;
+  $('#mcpMissing').hidden = !!s.mcpUrl || isLocal;
   if (s.mcpScript) $('#mcpConfig').textContent = `"trading-bot": { "command": "node", "args": [${JSON.stringify(s.mcpScript)}] }`;
   $('#mode').textContent = s.demoMode ? 'DEMO' : 'PAPER';
   $('#mode').className = `badge ${s.demoMode ? 'warn' : ''}`;
