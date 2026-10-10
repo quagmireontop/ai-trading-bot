@@ -8,6 +8,7 @@ import { getNews } from './news.js';
 import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, runBotCycle } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
 import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
+import { scan, backtestScan, listFields } from './screener.js';
 
 const SOURCE = 'claude-mcp';
 const ok = (data) => ({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] });
@@ -147,6 +148,43 @@ export function createMcpServer() {
     title: 'Compare strategies', description: 'Backtests every strategy with default settings on one symbol and ranks them against buy-and-hold.',
     inputSchema: { symbol: z.string(), days: z.number().int().min(60).max(2500).default(500) }, annotations: readOnly,
   }, wrap(({ symbol, days }) => compareStrategies({ symbol, days })));
+
+  const universe = z.union([z.enum(['large_caps', 'sector_etfs', 'watchlist']), z.array(z.string())]).default('large_caps')
+    .describe('large_caps (~100 big US stocks), sector_etfs, watchlist, or a list of symbols');
+  const query = z.string().describe('Conditions joined by AND, e.g. "rsi_14 < 30 AND above_sma_200 AND return_20d > -15". Call list_screener_fields for fields.');
+
+  server.registerTool('list_screener_fields', {
+    title: 'Screener fields', description: 'Fields and universes available to scan_stocks and backtest_scan.', inputSchema: {}, annotations: readOnly,
+  }, wrap(() => listFields()));
+
+  server.registerTool('scan_stocks', {
+    title: 'Scan stocks', description: 'Finds stocks in a universe that match the conditions today, or as of a past date (asof, YYYY-MM-DD) using only data known then.',
+    inputSchema: {
+      q: query, universe,
+      order: z.string().default('return_20d').describe('Field to rank matches by'),
+      dir: z.enum(['asc', 'desc']).default('desc'),
+      limit: z.number().int().min(1).max(100).default(20),
+      asof: z.string().optional(),
+    },
+    annotations: readOnly,
+  }, wrap((args) => scan(args)));
+
+  server.registerTool('backtest_scan', {
+    title: 'Backtest a screen',
+    description: 'Portfolio backtest: on each rebalance date, scan the universe with only data known that day, buy the top N matches in equal weights at the next open, hold until the next rebalance, compound. Compares with SPY. Universe is today\'s companies, so results carry survivorship bias.',
+    inputSchema: {
+      q: query, universe,
+      order: z.string().default('return_20d'), dir: z.enum(['asc', 'desc']).default('desc'),
+      top: z.number().int().min(1).max(50).default(10),
+      rebalance_days: z.number().int().min(1).max(252).default(21).describe('Trading days between rebalances (5 weekly, 21 monthly, 63 quarterly)'),
+      days: z.number().int().min(60).max(2500).default(504),
+      capital: z.number().positive().default(10000),
+    },
+    annotations: readOnly,
+  }, wrap(async ({ rebalance_days, ...args }) => {
+    const { curve, ...r } = await backtestScan({ ...args, rebalanceDays: rebalance_days });
+    return { ...r, periods: r.periods.slice(-12) };
+  }));
 
   server.registerTool('get_activity', {
     title: 'Activity log', description: 'Recent activity from the website, the bot and Claude (orders, bot runs, toggles).',

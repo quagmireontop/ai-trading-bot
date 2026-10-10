@@ -120,6 +120,35 @@ export async function getBars(symbol, days = 30) {
   return demoBars(symbol, days);
 }
 
+// Daily bars for many symbols at once: { SYMBOL: [bars...] }. Cached for an hour
+// because screener backtests re-use the same history across runs.
+const multiCache = new Map();
+export async function getBarsMulti(symbols, days = 500) {
+  symbols = [...new Set(symbols.map((s) => s.toUpperCase()))];
+  const key = `${symbols.join(',')}|${days}`;
+  const hit = multiCache.get(key);
+  if (hit && Date.now() - hit.at < 3600000) return hit.data;
+  const out = {};
+  if (demoMode) {
+    for (const s of symbols) out[s] = demoBars(s, days);
+  } else {
+    const start = new Date(Date.now() - (days * 1.6 + 5) * 86400000).toISOString().slice(0, 10);
+    for (let i = 0; i < symbols.length; i += 50) { // keep URLs a sane length
+      const chunk = symbols.slice(i, i + 50);
+      let token = '';
+      do {
+        const r = await market(`/v2/stocks/bars?symbols=${chunk.map(encodeURIComponent).join(',')}&timeframe=1Day&start=${start}&limit=10000&feed=iex&adjustment=split${token ? `&page_token=${token}` : ''}`);
+        for (const [sym, bars] of Object.entries(r.bars || {})) (out[sym] ??= []).push(...bars);
+        token = r.next_page_token || '';
+      } while (token);
+    }
+    for (const s of Object.keys(out)) out[s] = out[s].slice(-days);
+  }
+  multiCache.set(key, { at: Date.now(), data: out });
+  if (multiCache.size > 20) multiCache.delete(multiCache.keys().next().value);
+  return out;
+}
+
 export async function placeOrder({ symbol, side, qty, notional, type = 'market', limitPrice }) {
   symbol = symbol.toUpperCase();
   if (!['buy', 'sell'].includes(side)) throw new Error('side must be buy or sell');

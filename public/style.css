@@ -150,3 +150,8 @@ footer { text-align: center; padding: 20px 16px 32px; }
 .bt-chart text { fill: var(--muted); font-size: 11px; }
 .bt-chart .grid { stroke: var(--border); }
 .bt-chart .strat { stroke: var(--accent); } .bt-chart .bh { stroke: var(--neutral); stroke-dasharray: 4 3; }
+.sc-q { grid-column: 1 / -1; }
+.sc-q input { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.sc-help { margin: 10px 0; } .sc-help ul { columns: 2; padding-left: 18px; } .sc-help code { font-size: 12px; }
+td.picks { white-space: normal; min-width: 200px; color: var(--muted); }
+@media (max-width: 700px) { .sc-help ul { columns: 1; } }

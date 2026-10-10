@@ -10,6 +10,7 @@ import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, runBotC
 import { logActivity, getActivity } from './store.js';
 import { createMcpServer } from './tools.js';
 import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
+import { scan, backtestScan, listFields } from './screener.js';
 import { loginEnabled, requireAuth, requirePageAuth, handleLogin, handleLogout, mcpAllowed } from './auth.js';
 
 export const app = express();
@@ -49,6 +50,9 @@ api.get('/activity', route(() => getActivity(50)));
 api.get('/backtest/strategies', route(() => listStrategies()));
 api.post('/backtest', route((r) => runBacktest(r.body)));
 api.post('/backtest/compare', route((r) => compareStrategies(r.body)));
+api.get('/screener/fields', route(() => listFields()));
+api.post('/screener/scan', route((r) => scan(r.body)));
+api.post('/screener/backtest', route((r) => backtestScan(r.body)));
 api.post('/orders', route(async (r) => {
   const { symbol, side, qty, notional, type, limitPrice } = r.body;
   const order = await broker.placeOrder({ symbol, side, qty: qty && Number(qty), notional: notional && Number(notional), type, limitPrice: limitPrice && Number(limitPrice) });

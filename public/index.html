@@ -103,6 +103,31 @@
         <p class="muted small">Past results don't predict future returns. News sentiment isn't included because historical sentiment isn't available.</p>
       </section>
 
+      <section class="card span3" id="screener">
+        <div class="card-head"><h2>Stock screener and portfolio backtest</h2><span class="muted small">Scan as of each past date · buy the top picks · rebalance · compare with SPY</span></div>
+        <form id="scForm" class="bt-form">
+          <label class="sc-q">Conditions<input name="q" value="rsi_14 < 30 AND above_sma_200" required autocomplete="off" spellcheck="false"></label>
+          <label>Stocks<select name="universe"><option value="large_caps">~100 large US companies</option><option value="sector_etfs">Sector ETFs</option><option value="watchlist">My watchlist</option></select></label>
+          <label>Rank by<select name="order" id="scOrder"></select></label>
+          <label>Order<select name="dir"><option value="desc">Highest first</option><option value="asc">Lowest first</option></select></label>
+          <label>Hold top<input name="top" type="number" min="1" max="50" value="10"></label>
+          <label>Rebalance<select name="rebalanceDays"><option value="5">Weekly</option><option value="21" selected>Monthly</option><option value="63">Quarterly</option></select></label>
+          <label>Period<select name="days"><option value="252">1 year</option><option value="504" selected>2 years</option><option value="1260">5 years</option></select></label>
+          <div class="bt-actions"><button type="submit">Backtest this screen</button><button type="button" id="scNow" class="ghost">Scan today</button></div>
+        </form>
+        <details class="small muted sc-help"><summary>What can I scan for?</summary><ul id="scFields"></ul><p>Join conditions with AND. Examples: <code>return_60d &gt; 10 AND above_sma_50</code>, <code>rsi_2 &lt; 10 AND above_sma_200</code>, <code>from_high_252 &lt; 5</code>.</p></details>
+        <div id="scMsg" class="small"></div>
+        <div id="scResult" hidden>
+          <div class="bt-kpis" id="scKpis"></div>
+          <div class="bt-legend small"><span><i class="sw strat"></i>Your screen</span><span><i class="sw bh"></i>SPY</span></div>
+          <div id="scChart" class="bt-chart"></div>
+          <h3>Rebalances (latest first)</h3>
+          <div class="table-wrap"><table id="scPeriods"><thead><tr><th>Date</th><th>Picks</th><th class="num">Return</th><th class="num">Value</th></tr></thead><tbody></tbody></table></div>
+        </div>
+        <div id="scNowResult" class="table-wrap" hidden></div>
+        <p class="muted small">The stock list is today's companies, so ones that collapsed or were delisted are missing. That makes backtests look somewhat better than reality.</p>
+      </section>
+
       <section class="card span2">
         <div class="card-head">
           <h2>Latest news</h2>

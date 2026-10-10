@@ -225,14 +225,14 @@ function renderParams() {
 }
 $('#btStrategy').addEventListener('change', renderParams);
 
-function btChart(curve, capital) {
-  const W = Math.max(300, $('#btChart').clientWidth || 800), H = 240, L = 56, R = 8, T = 10, B = 24;
-  const vals = curve.flatMap((p) => [p.strategy, p.buyAndHold]);
+function btChart(curve, capital, el = $('#btChart')) {
+  const W = Math.max(300, el.clientWidth || 800), H = 240, L = 56, R = 8, T = 10, B = 24;
+  const vals = curve.flatMap((p) => [p.strategy, p.buyAndHold]).filter((v) => v != null);
   let min = Math.min(...vals, capital), max = Math.max(...vals, capital);
   const pad = (max - min) * 0.05 || 1; min -= pad; max += pad;
   const x = (i) => L + (i / (curve.length - 1)) * (W - L - R);
   const y = (v) => T + (1 - (v - min) / (max - min)) * (H - T - B);
-  const line = (key) => curve.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join('');
+  const line = (key) => { let pen = 'M'; return curve.map((p, i) => { if (p[key] == null) { pen = 'M'; return ''; } const seg = `${pen}${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`; pen = 'L'; return seg; }).join(''); };
   const ticks = [min + pad, capital, max - pad].filter((v, i, a) => a.findIndex((w) => Math.abs(w - v) < (max - min) * 0.08) === i);
   const fmt = (v) => (v >= 1000 ? `$${(v / 1000).toFixed(1)}k` : `$${v.toFixed(0)}`);
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Equity curve: strategy versus buy and hold">
@@ -295,6 +295,54 @@ $('#btCompare').addEventListener('click', async (e) => {
   } finally { e.target.disabled = false; }
 });
 
+// ---------- Screener ----------
+async function loadScreenerFields() {
+  const f = await api('/screener/fields');
+  $('#scFields').innerHTML = Object.entries(f.fields).map(([k, d]) => `<li><code>${esc(k)}</code> ${esc(d)}</li>`).join('');
+  $('#scOrder').innerHTML = Object.keys(f.fields).filter((k) => !k.startsWith('above_')).map((k) => `<option value="${esc(k)}"${k === 'return_20d' ? ' selected' : ''}>${esc(k)}</option>`).join('');
+}
+const scBody = () => Object.fromEntries(new FormData($('#scForm')).entries());
+
+$('#scForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = e.target.querySelector('button[type=submit]');
+  btn.disabled = true; $('#scMsg').textContent = 'Running… the first run loads price history for every stock and can take a little while.'; $('#scNowResult').hidden = true;
+  try {
+    const r = await api('/screener/backtest', { method: 'POST', body: scBody() });
+    const res = r.result;
+    const beat = r.benchmarkReturnPct == null ? null : res.totalReturnPct - r.benchmarkReturnPct;
+    $('#scMsg').innerHTML = `<code>${esc(r.q)}</code> · ${r.universeSize} stocks · ${esc(r.from)} to ${esc(r.to)}${beat == null ? '' : `: <span class="${cls(beat)}">${beat >= 0 ? 'beat' : 'trailed'} ${esc(r.benchmark)} by ${Math.abs(beat).toFixed(1)} points</span>`}`;
+    const kpi = (label, v, sub) => `<div><span>${label}</span><strong>${v}</strong>${sub ? ` <small>${sub}</small>` : ''}</div>`;
+    $('#scKpis').innerHTML = [
+      kpi('Screen return', `<span class="${cls(res.totalReturnPct)}">${pct(res.totalReturnPct)}</span>`, `ends ${usd(res.endingValue)}`),
+      kpi(esc(r.benchmark), r.benchmarkReturnPct == null ? '–' : `<span class="${cls(r.benchmarkReturnPct)}">${pct(r.benchmarkReturnPct)}</span>`),
+      kpi('Per year', pct(res.annualReturnPct)),
+      kpi('Worst drop', `<span class="neg">-${res.maxDrawdownPct.toFixed(1)}%</span>`),
+      kpi('Winning periods', res.winningPeriodsPct == null ? '–' : `${res.winningPeriodsPct}%`, `${res.periodsInvested}/${res.periods} invested`),
+      kpi('Avg picks', res.avgPicks),
+    ].join('');
+    $('#scResult').hidden = false;
+    $('#scChart').innerHTML = btChart(r.curve, r.capital, $('#scChart'));
+    $('#scPeriods tbody').innerHTML = [...r.periods].reverse().map((p) => `<tr><td>${esc(p.date)}</td><td class="picks">${p.picks.length ? esc(p.picks.join(', ')) : 'no matches, stayed in cash'}</td><td class="num ${cls(p.returnPct)}">${pct(p.returnPct)}</td><td class="num">${usd(p.equity)}</td></tr>`).join('');
+  } catch (err) {
+    $('#scMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+  } finally { btn.disabled = false; }
+});
+
+$('#scNow').addEventListener('click', async (e) => {
+  e.target.disabled = true; $('#scMsg').textContent = 'Scanning…'; $('#scResult').hidden = true;
+  try {
+    const b = scBody();
+    const r = await api('/screener/scan', { method: 'POST', body: { q: b.q, universe: b.universe, order: b.order, dir: b.dir, limit: 50 } });
+    $('#scMsg').innerHTML = `<strong>${r.count}</strong> of ${r.universeSize} stocks match as of ${esc(r.asOf)}`;
+    $('#scNowResult').innerHTML = r.results.length ? `<table><thead><tr><th>Symbol</th><th class="num">Price</th><th class="num">RSI 14</th><th class="num">20-day</th><th class="num">Below 1-yr high</th></tr></thead><tbody>
+      ${r.results.map((x) => `<tr class="click" data-sym="${esc(x.ticker)}"><td><strong>${esc(x.ticker)}</strong></td><td class="num">${usd(x.close)}</td><td class="num">${x.rsi_14 ?? '–'}</td><td class="num ${cls(x.return_20d)}">${pct(x.return_20d)}</td><td class="num">${x.from_high_252 == null ? '–' : `${x.from_high_252}%`}</td></tr>`).join('')}</tbody></table>` : '<p class="muted small">Nothing matches today.</p>';
+    $('#scNowResult').hidden = false;
+  } catch (err) {
+    $('#scMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`;
+  } finally { e.target.disabled = false; }
+});
+
 $('#mcpUrl').onclick = () => navigator.clipboard?.writeText($('#mcpUrl').textContent);
 const safe = (fn) => fn().catch((e) => console.error(e));
 function refreshPortfolio() {
@@ -311,5 +359,6 @@ function refreshNews() { safe(loadTrends); safe(loadNews); safe(loadSignals); }
 refreshPortfolio();
 refreshNews();
 safe(loadStrategies);
+safe(loadScreenerFields);
 setInterval(refreshPortfolio, 30000);
 setInterval(refreshNews, 5 * 60000);

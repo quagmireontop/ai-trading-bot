@@ -35,7 +35,7 @@ npm test                    # runs the test suite offline
 The MCP server exposes these tools: `get_account`, `get_positions`, `get_orders`,
 `get_quote`, `get_price_history`, `get_news`, `get_market_trends`, `analyze_stock`,
 `get_trade_signals`, `place_order`, `cancel_order`, `get_bot_status`, `set_bot_enabled`,
-`run_bot_cycle`, `get_activity`, `list_backtest_strategies`, `run_backtest`, `compare_strategies`.
+`run_bot_cycle`, `get_activity`, `list_backtest_strategies`, `run_backtest`, `compare_strategies`, `list_screener_fields`, `scan_stocks`, `backtest_scan`.
 
 **Claude Code / Claude Desktop on your computer (stdio):**
 
@@ -108,6 +108,24 @@ Trades happen at the next day's open (no peeking ahead), long only, with a 0.05%
 trade. Results show return, worst drop, Sharpe, win rate and every trade. News sentiment
 isn't included because historical sentiment data isn't available. Past results don't
 predict future returns.
+
+## Stock screener and portfolio backtest
+
+Write a screen like `rsi_14 < 30 AND above_sma_200` and the bot:
+
+1. On each rebalance date (weekly, monthly or quarterly), evaluates it for every stock in
+   the universe using only data known that day.
+2. Buys the top N matches (ranked by a field you choose) in equal weights at the next open.
+3. Holds until the next rebalance, then repeats, compounding into an equity curve vs SPY.
+
+**Scan today** runs the same screen on the latest data. Fields: `close`, `rsi_14`, `rsi_2`,
+`sma_20/50/200`, `above_sma_50`, `above_sma_200`, `return_5d/20d/60d/252d`,
+`from_high_252`, `volatility_20d`, `avg_volume_20`. Universes: ~100 large US companies,
+sector ETFs, your watchlist, or a custom list (via Claude).
+
+Limitation: the universe is today's list of companies, so it misses stocks that
+collapsed or were delisted (survivorship bias), and there's no market-cap data. A paid
+point-in-time data source (e.g. Tickerbot) would remove that bias.
 
 ## Autonomous bot and safety limits
 
