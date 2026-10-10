@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Trading Bot</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f766e'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .login { max-width: 360px; margin: 12vh auto 0; padding: 0 16px; }
+    .login .card { display: grid; gap: 14px; padding: 24px; }
+    .login .brand { justify-content: center; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <main class="login">
+    <form class="card" method="post" action="/login">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M6 22l6-7 5 4 9-11" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>AI Trading Bot</span>
+      </div>
+      <label>Password<input type="password" name="password" autocomplete="current-password" required autofocus></label>
+      <div id="err" class="neg small" hidden></div>
+      <button type="submit">Log in</button>
+    </form>
+  </main>
+  <script>
+    const e = new URLSearchParams(location.search).get('error');
+    if (e) { const el = document.getElementById('err'); el.hidden = false; el.textContent = e === 'locked' ? 'Too many attempts. Try again in 15 minutes.' : 'Wrong password.'; }
+  </script>
+</body>
+</html>

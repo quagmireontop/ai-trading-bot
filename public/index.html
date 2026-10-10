@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Trading Bot</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230f766e'/><path d='M6 22l6-7 5 4 9-11' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="8" fill="var(--accent)"/><path d="M6 22l6-7 5 4 9-11" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>AI Trading Bot</span>
+      <span id="mode" class="badge">…</span>
+      <span id="market" class="badge muted">…</span>
+    </div>
+    <div class="bot-control">
+      <span class="label">Autonomous bot</span>
+      <label class="switch"><input type="checkbox" id="botToggle"><span></span></label>
+      <button id="runBot" class="ghost">Run once</button>
+      <a id="logout" href="/logout" class="small muted" hidden>Log out</a>
+    </div>
+  </header>
+
+  <main>
+    <div id="accountError" class="alert" hidden></div>
+    <section class="kpis" id="kpis">
+      <div class="kpi"><span>Equity</span><strong id="kEquity">–</strong></div>
+      <div class="kpi"><span>Today</span><strong id="kDay">–</strong></div>
+      <div class="kpi"><span>Cash</span><strong id="kCash">–</strong></div>
+      <div class="kpi"><span>Buying power</span><strong id="kBp">–</strong></div>
+    </section>
+
+    <div class="grid">
+      <section class="card span2">
+        <div class="card-head"><h2>What's moving markets</h2><span id="trendsTime" class="muted small"></span></div>
+        <div class="mood">
+          <div><span class="muted small">Market mood</span><div id="mood" class="mood-text">–</div></div>
+          <div class="gauge"><div class="gauge-track"><div id="gaugeDot" class="gauge-dot"></div></div><div class="gauge-labels"><span>Negative</span><span>Positive</span></div></div>
+        </div>
+        <div class="two-col">
+          <div><h3>Trending topics</h3><ul id="topics" class="bars"></ul></div>
+          <div><h3>Most-mentioned tickers</h3><ul id="tickers" class="bars"></ul></div>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Trade</h2><span class="badge muted">paper</span></div>
+        <form id="tradeForm" class="trade">
+          <label>Symbol<input name="symbol" placeholder="AAPL" required autocomplete="off"></label>
+          <div class="seg" role="radiogroup">
+            <input type="radio" name="side" value="buy" id="sBuy" checked><label for="sBuy">Buy</label>
+            <input type="radio" name="side" value="sell" id="sSell"><label for="sSell">Sell</label>
+          </div>
+          <div class="row">
+            <label>Amount<input name="amount" type="number" min="0" step="any" placeholder="500" required></label>
+            <label>In<select name="unit"><option value="notional">Dollars</option><option value="qty">Shares</option></select></label>
+          </div>
+          <div id="quoteLine" class="muted small"></div>
+          <button type="submit">Place paper order</button>
+          <div id="tradeMsg" class="small"></div>
+        </form>
+      </section>
+
+      <section class="card span3">
+        <div class="card-head"><h2>Bot signals</h2><span class="muted small">News sentiment 60% · price momentum 40%</span></div>
+        <div class="table-wrap"><table id="signals"><thead><tr><th>Symbol</th><th>Signal</th><th class="num">Score</th><th class="num">Headlines</th><th class="num">News mood</th><th class="num">5/20d trend</th><th>Top headline</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="card span2">
+        <div class="card-head"><h2>Positions</h2></div>
+        <div class="table-wrap"><table id="positions"><thead><tr><th>Symbol</th><th class="num">Qty</th><th class="num">Avg</th><th class="num">Price</th><th class="num">Value</th><th class="num">P/L</th></tr></thead><tbody></tbody></table></div>
+        <h3 class="mt">Recent orders</h3>
+        <div class="table-wrap"><table id="orders"><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th class="num">Qty / $</th><th>Status</th></tr></thead><tbody></tbody></table></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Activity</h2><span class="muted small">site · bot · Claude</span></div>
+        <ul id="activity" class="activity"></ul>
+      </section>
+
+      <section class="card span2">
+        <div class="card-head">
+          <h2>Latest news</h2>
+          <div class="filters">
+            <div class="seg small" id="newsCat">
+              <input type="radio" name="cat" value="" id="cAll" checked><label for="cAll">All</label>
+              <input type="radio" name="cat" value="markets" id="cMk"><label for="cMk">Markets</label>
+              <input type="radio" name="cat" value="world" id="cWd"><label for="cWd">World</label>
+            </div>
+            <input id="newsSearch" type="search" placeholder="Search headlines">
+          </div>
+        </div>
+        <ul id="news" class="news"></ul>
+        <div id="newsErrors" class="muted small"></div>
+      </section>
+
+      <section class="card">
+        <div class="card-head"><h2>Connect Claude</h2></div>
+        <p class="small">Claude can read news, check signals and place paper trades with the same tools this page uses. Everything it does shows up in Activity.</p>
+        <div id="localMcp">
+          <h3>Claude desktop app (this PC)</h3>
+          <p class="small">Add this under <code>mcpServers</code> in Settings › Developer › Edit Config, then fully quit and reopen Claude:</p>
+          <pre id="mcpConfig" class="small">"trading-bot": { "command": "node", "args": ["/path/to/trading-bot/src/mcp-stdio.js"] }</pre>
+          <p class="muted small">The claude.ai Connectors screen can't reach a bot running on your PC. Host it online (see README) to use Claude on the web and phone.</p>
+        </div>
+        <div id="remoteMcp" hidden>
+          <h3>Claude on the web and phone</h3>
+          <p class="small">Add this private link in claude.ai › Settings › Connectors › Add custom connector. Keep it secret; it works like a password.</p>
+          <code id="mcpUrl" class="copy" title="Click to copy"></code>
+        </div>
+        <p class="muted small">Try asking Claude: “What are today's market trends and which watchlist stocks look strongest?”</p>
+      </section>
+    </div>
+  </main>
+
+  <dialog id="detail">
+    <form method="dialog"><button class="close ghost" aria-label="Close">✕</button></form>
+    <div id="detailBody"></div>
+  </dialog>
+
+  <footer class="muted small">Paper trading only. Signals are automated heuristics, not financial advice.</footer>
+  <script src="app.js"></script>
+</body>
+</html>
