@@ -41,7 +41,24 @@ async function loadStatus() {
   $('#mode').title = s.demoMode ? 'No Alpaca keys found: simulated portfolio and prices' : 'Connected to Alpaca paper trading';
   $('#market').textContent = s.clock?.demo ? 'Simulated market' : s.clock?.isOpen ? 'Market open' : 'Market closed';
   $('#botToggle').checked = s.bot.enabled;
-  $('#botToggle').title = `Every ${s.bot.intervalMinutes} min · max $${s.bot.maxPositionUsd}/position · ${s.bot.ordersToday}/${s.bot.maxOrdersPerDay} orders today`;
+  $('#botToggle').title = `${s.bot.mode === 'screen' ? 'Trades your screen' : 'Trades news signals'} · checks every ${s.bot.intervalMinutes} min · max $${s.bot.maxPositionUsd}/position · ${s.bot.ordersToday}/${s.bot.maxOrdersPerDay} orders today`;
+  renderBotMode(s.bot);
+}
+
+function renderBotMode(b) {
+  const on = b.enabled ? '' : ' <span class="muted">(bot is off: turn on the switch at the top to start)</span>';
+  if (b.mode !== 'screen') {
+    $('#botMode').innerHTML = `The bot trades these news signals on your watchlist.${on}`;
+    return;
+  }
+  const every = { 5: 'weekly', 21: 'monthly', 63: 'quarterly' }[b.screen.rebalanceDays] || `every ${b.screen.rebalanceDays} trading days`;
+  const next = b.nextRebalance ? `next rebalance ${new Date(b.nextRebalance).toLocaleDateString()}` : 'buys at the next run while the market is open';
+  $('#botMode').innerHTML = `The bot is trading your screen <code>${esc(b.screen.q)}</code>: top ${b.screen.top} by ${esc(b.screen.order)}, ${usd(b.perPickUsd)} each, rebalanced ${every}, ${next}.`
+    + `${b.managed.length ? ` Holding ${esc(b.managed.join(', '))}.` : ''}${on} <button type="button" id="useSignals" class="link">Switch back to news signals</button>`;
+  $('#useSignals').onclick = async () => {
+    if (!confirm('Switch the bot back to news signals? Stocks it bought for the screen stay in your account until a sell signal or you sell them.')) return;
+    try { await api('/bot/strategy', { method: 'POST', body: { mode: 'signals' } }); loadStatus(); loadActivity(); } catch (err) { alert(err.message); }
+  };
 }
 
 async function loadAccount() {
@@ -115,6 +132,7 @@ async function loadActivity() {
   $('#activity').innerHTML = items.length ? items.map((a) => {
     let what = a.action;
     if (a.action === 'order') what = `${a.side} ${a.symbol} ${a.qty ? `${+(+a.qty).toFixed(4)} sh` : usd(a.notional)}`;
+    if (a.action === 'bot-strategy') what = a.mode === 'screen' ? `bot now trades screen: ${a.q} (top ${a.top})` : 'bot now trades news signals';
     if (a.action === 'bot-cycle') what = `bot run · ${a.ordersPlaced} order(s)${a.marketOpen === false ? ' · market closed' : ''}`;
     return `<li><span><span class="src ${esc(a.source)}">${esc(label[a.source] || a.source)}</span> <span class="muted">${ago(a.time)}</span></span>
       <span>${esc(what)}</span>${a.reason ? `<span class="muted">${esc(a.reason)}</span>` : ''}${a.error ? `<span class="neg">${esc(a.error)}</span>` : ''}</li>`;
@@ -200,7 +218,7 @@ $('#botToggle').addEventListener('change', async (e) => {
 });
 $('#runBot').addEventListener('click', async (e) => {
   e.target.disabled = true; e.target.textContent = 'Running…';
-  try { const r = await api('/bot/run', { method: 'POST' }); if (!r.marketOpen) alert('Market is closed: signals refreshed, no orders placed.'); refreshPortfolio(); loadSignals(); }
+  try { const r = await api('/bot/run', { method: 'POST' }); if (!r.marketOpen) alert('Market is closed, so no orders were placed.'); else if (!r.actions.some((a) => a.orderId)) alert(r.actions.map((a) => a.note || a.error).filter(Boolean).join('\n') || 'Nothing to do right now.'); refreshPortfolio(); loadSignals(); loadStatus(); }
   catch (err) { alert(err.message); }
   finally { e.target.disabled = false; e.target.textContent = 'Run once'; }
 });
@@ -362,3 +380,15 @@ safe(loadStrategies);
 safe(loadScreenerFields);
 setInterval(refreshPortfolio, 30000);
 setInterval(refreshNews, 5 * 60000);
+
+$('#scUse').addEventListener('click', async () => {
+  const b = scBody();
+  const top = Math.min(20, Math.max(1, +b.top || 5));
+  const budget = prompt(`The bot will buy the top ${top} stocks from this screen with paper money, sell the ones that drop out, and rebalance on the schedule you picked. It only ever sells stocks it bought itself.\n\nTotal paper dollars to use (each stock is also capped by MAX_POSITION_USD):`, '10000');
+  if (budget == null) return;
+  try {
+    await api('/bot/strategy', { method: 'POST', body: { mode: 'screen', q: b.q, universe: b.universe, order: b.order, dir: b.dir, top, rebalanceDays: +b.rebalanceDays, budget: +budget } });
+    await loadStatus(); loadActivity();
+    $('#scMsg').innerHTML = `The bot will trade this screen.${$('#botToggle').checked ? '' : ' Turn on the <strong>Autonomous bot</strong> switch at the top to start.'}`;
+  } catch (err) { $('#scMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`; }
+});

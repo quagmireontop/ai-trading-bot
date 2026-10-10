@@ -5,6 +5,7 @@ import * as broker from './broker.js';
 import { fetchAllNews } from './news.js';
 import { summarizeTrends } from './trends.js';
 import { read, write, logActivity } from './store.js';
+import { scan, parseQuery } from './screener.js';
 
 const clamp = (x, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, x));
 const sma = (arr) => arr.reduce((s, x) => s + x, 0) / arr.length;
@@ -49,32 +50,123 @@ export async function getSignals(symbols = config.bot.watchlist) {
 // the scheduler that actually executes cycles.
 const today = () => new Date().toISOString().slice(0, 10);
 
+const DEFAULT_SCREEN = { universe: 'large_caps', order: 'return_20d', dir: 'desc', top: 5, rebalanceDays: 21 };
+const DEFAULT_BUDGET = 10000;
+// Trading days -> calendar days, roughly (5 trading days per week).
+const nextRebalance = (s) => {
+  if (!s.lastRebalance) return null;
+  const days = Math.ceil((s.screen?.rebalanceDays ?? 21) * 7 / 5);
+  return new Date(new Date(s.lastRebalance).getTime() + days * 86400000).toISOString();
+};
+
 export function botStatus() {
   const s = read('bot', {});
+  const mode = s.mode === 'screen' && s.screen?.q ? 'screen' : 'signals';
   return {
     enabled: s.enabled ?? config.bot.autoTrade,
+    mode,
     intervalMinutes: config.bot.intervalMinutes,
     maxPositionUsd: config.bot.maxPositionUsd,
     maxOrdersPerDay: config.bot.maxOrdersPerDay,
     watchlist: config.bot.watchlist,
     lastRun: s.lastRun || null,
     ordersToday: s.day === today() ? s.ordersToday : 0,
+    ...(mode === 'screen' && {
+      screen: s.screen,
+      budget: s.budget ?? DEFAULT_BUDGET,
+      perPickUsd: Math.min((s.budget ?? DEFAULT_BUDGET) / s.screen.top, config.bot.maxPositionUsd),
+      managed: s.managed || [],
+      lastRebalance: s.lastRebalance || null,
+      nextRebalance: nextRebalance(s),
+    }),
     paperOnly: true,
   };
 }
 
-export async function runBotCycle(source = 'bot') {
+// Switch what the bot trades: 'signals' (news + momentum on the watchlist) or
+// 'screen' (hold the top N results of a screener query, rebalanced on a schedule).
+export function setBotStrategy({ mode, q, universe, order, dir, top, rebalanceDays, budget }, source) {
+  const s = read('bot', {});
+  if (mode === 'screen') {
+    if (!q || !String(q).trim()) throw new Error('A screen query is required, e.g. "rsi_14 < 30 and close > sma_200"');
+    parseQuery(q); // throws on a bad query before we save it
+    const screen = {
+      ...DEFAULT_SCREEN, ...(s.screen || {}),
+      q: String(q).trim(),
+      ...(universe && { universe }), ...(order && { order }), ...(dir && { dir }),
+      ...(top && { top: Math.max(1, Math.min(20, Math.floor(top))) }),
+      ...(rebalanceDays && { rebalanceDays: Math.max(1, Math.min(126, Math.floor(rebalanceDays))) }),
+    };
+    const changed = JSON.stringify(screen) !== JSON.stringify(s.screen);
+    write('bot', { ...s, mode: 'screen', screen, budget: budget ? Math.max(100, +budget) : (s.budget ?? DEFAULT_BUDGET), ...(changed && { lastRebalance: null }) });
+    logActivity(source, 'bot-strategy', { mode: 'screen', q: screen.q, top: screen.top, rebalanceDays: screen.rebalanceDays });
+  } else {
+    write('bot', { ...s, mode: 'signals' });
+    logActivity(source, 'bot-strategy', { mode: 'signals' });
+  }
+  return botStatus();
+}
+
+async function runScreenCycle(source, state, held, actions, { force = false } = {}) {
+  const s = botStatus();
+  const due = force || !s.lastRebalance || Date.now() >= new Date(s.nextRebalance).getTime();
+  if (!due) {
+    actions.push({ note: `Holding screen picks until the next rebalance on ${s.nextRebalance.slice(0, 10)}.` });
+    return { rebalanced: false };
+  }
+  const { q, universe, order, dir, top } = s.screen;
+  const res = await scan({ q, universe, order, dir, limit: top });
+  const picks = res.results.map((r) => r.ticker);
+  const managed = new Set(s.managed);
+  const reason = `screen: ${q} (top ${top} by ${order})`;
+
+  // Only ever sell what the bot itself bought, never your other holdings.
+  for (const sym of [...managed]) {
+    if (picks.includes(sym)) continue;
+    if (!held.has(sym)) { managed.delete(sym); continue; }
+    if (state.ordersToday >= config.bot.maxOrdersPerDay) { actions.push({ note: 'Daily order limit reached.' }); break; }
+    try {
+      const qty = held.get(sym).qty;
+      const o = await broker.placeOrder({ symbol: sym, side: 'sell', qty });
+      state.ordersToday++;
+      managed.delete(sym);
+      actions.push({ symbol: sym, side: 'sell', orderId: o.id, note: 'dropped out of the screen' });
+      logActivity(source, 'order', { symbol: sym, side: 'sell', qty, reason: `${reason}; no longer a pick` });
+    } catch (e) { actions.push({ symbol: sym, error: e.message }); }
+  }
+  for (const sym of picks) {
+    if (held.has(sym)) { if (!managed.has(sym)) actions.push({ symbol: sym, note: 'already held outside the bot; skipped' }); continue; }
+    if (state.ordersToday >= config.bot.maxOrdersPerDay) { actions.push({ note: 'Daily order limit reached.' }); break; }
+    try {
+      const notional = Math.floor(s.perPickUsd);
+      const o = await broker.placeOrder({ symbol: sym, side: 'buy', notional });
+      state.ordersToday++;
+      managed.add(sym);
+      actions.push({ symbol: sym, side: 'buy', orderId: o.id, notional });
+      logActivity(source, 'order', { symbol: sym, side: 'buy', notional, reason });
+    } catch (e) { actions.push({ symbol: sym, error: e.message }); }
+  }
+  // Only count it as rebalanced if every pick got handled (limit hits retry next cycle).
+  const complete = !actions.some((a) => a.note === 'Daily order limit reached.');
+  return { rebalanced: complete, picks, managed: [...managed], asOf: res.asOf };
+}
+
+export async function runBotCycle(source = 'bot', { force = false } = {}) {
   const clock = await broker.getMarketClock().catch(() => ({ isOpen: false }));
-  const signals = await getSignals();
+  const mode = botStatus().mode;
+  const signals = mode === 'signals' ? await getSignals() : [];
   const positions = await broker.getPositions();
   const held = new Map(positions.map((p) => [p.symbol, p]));
   const actions = [];
+  let screenResult = null;
 
   const state = read('bot', {});
   if (state.day !== today()) Object.assign(state, { day: today(), ordersToday: 0 });
 
   if (!clock.isOpen) {
-    actions.push({ note: 'Market is closed; signals computed but no orders placed.' });
+    actions.push({ note: 'Market is closed; no orders placed.' });
+  } else if (mode === 'screen') {
+    screenResult = await runScreenCycle(source, state, held, actions, { force });
   } else {
     for (const sig of signals) {
       if (state.ordersToday >= config.bot.maxOrdersPerDay) { actions.push({ note: 'Daily order limit reached.' }); break; }
@@ -97,11 +189,16 @@ export async function runBotCycle(source = 'bot') {
       }
     }
   }
-  // Re-read so a concurrent on/off toggle is not overwritten.
+  // Re-read so a concurrent on/off toggle or strategy change is not overwritten.
   const latest = read('bot', {});
-  write('bot', { ...latest, day: state.day, ordersToday: state.ordersToday, lastRun: new Date().toISOString() });
-  logActivity(source, 'bot-cycle', { ordersPlaced: actions.filter((a) => a.orderId).length, marketOpen: clock.isOpen });
-  return { ranAt: new Date().toISOString(), marketOpen: clock.isOpen, actions, signals };
+  const update = { day: state.day, ordersToday: state.ordersToday, lastRun: new Date().toISOString() };
+  if (screenResult?.managed && latest.mode === 'screen') {
+    update.managed = screenResult.managed;
+    if (screenResult.rebalanced) update.lastRebalance = new Date().toISOString();
+  }
+  write('bot', { ...latest, ...update });
+  logActivity(source, 'bot-cycle', { mode, ordersPlaced: actions.filter((a) => a.orderId).length, marketOpen: clock.isOpen });
+  return { ranAt: new Date().toISOString(), mode, marketOpen: clock.isOpen, actions, ...(mode === 'signals' ? { signals } : { screen: screenResult }) };
 }
 
 export function setBotEnabled(enabled, source) {

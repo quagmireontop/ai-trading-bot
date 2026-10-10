@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { demoMode } from './config.js';
 import * as broker from './broker.js';
 import { getNews } from './news.js';
-import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, runBotCycle } from './strategy.js';
+import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, setBotStrategy, runBotCycle } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
 import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
 import { scan, backtestScan, listFields } from './screener.js';
@@ -108,8 +108,12 @@ export function createMcpServer() {
     return r;
   }));
 
+  const universe = z.union([z.enum(['large_caps', 'sector_etfs', 'watchlist']), z.array(z.string())]).default('large_caps')
+    .describe('large_caps (~100 big US stocks), sector_etfs, watchlist, or a list of symbols');
+  const query = z.string().describe('Conditions joined by AND, e.g. "rsi_14 < 30 AND above_sma_200 AND return_20d > -15". Call list_screener_fields for fields.');
+
   server.registerTool('get_bot_status', {
-    title: 'Bot status', description: 'Whether the autonomous bot is enabled, its limits, watchlist and last run.', inputSchema: {}, annotations: readOnly,
+    title: 'Bot status', description: 'Whether the autonomous bot is enabled, what it trades (news signals or a screen), its limits, holdings it manages and last run.', inputSchema: {}, annotations: readOnly,
   }, wrap(() => botStatus()));
 
   server.registerTool('set_bot_enabled', {
@@ -118,9 +122,24 @@ export function createMcpServer() {
   }, wrap(({ enabled }) => setBotEnabled(enabled, SOURCE)));
 
   server.registerTool('run_bot_cycle', {
-    title: 'Run bot once', description: 'Runs one bot cycle now: computes signals and, if the market is open, places paper orders within the safety limits.',
-    inputSchema: {},
-  }, wrap(() => runBotCycle(SOURCE)));
+    title: 'Run bot once', description: 'Runs one bot cycle now. In signals mode it trades the watchlist on news + momentum; in screen mode it rebalances into the screen\'s top picks when a rebalance is due. Paper orders only, within the safety limits, and only while the market is open.',
+    inputSchema: { rebalance_now: z.boolean().default(false).describe('Screen mode only: rebalance now even if the next scheduled rebalance is later') },
+  }, wrap(({ rebalance_now }) => runBotCycle(SOURCE, { force: rebalance_now })));
+
+  server.registerTool('set_bot_strategy', {
+    title: 'Set what the bot trades',
+    description: 'Switches the autonomous paper bot between "signals" (news + momentum on the watchlist) and "screen" (hold the top N matches of a screener query in equal dollar amounts, rebalanced every rebalance_days trading days). In screen mode the bot only sells positions it bought itself. Confirm with the user before switching.',
+    inputSchema: {
+      mode: z.enum(['signals', 'screen']),
+      q: query.optional().describe('Screen mode: screener query, same syntax as scan_stocks'),
+      universe: z.union([z.enum(['large_caps', 'sector_etfs', 'watchlist']), z.array(z.string())]).optional(),
+      order: z.string().optional().describe('Field to rank matches by (default return_20d)'),
+      dir: z.enum(['asc', 'desc']).optional(),
+      top: z.number().int().min(1).max(20).optional().describe('How many picks to hold (default 5)'),
+      rebalance_days: z.number().int().min(1).max(126).optional().describe('Trading days between rebalances (default 21, monthly)'),
+      budget: z.number().positive().optional().describe('Total paper dollars for the screen (default 10000). Each pick also stays under MAX_POSITION_USD.'),
+    },
+  }, wrap(({ rebalance_days, ...args }) => setBotStrategy({ ...args, rebalanceDays: rebalance_days }, SOURCE)));
 
   server.registerTool('list_backtest_strategies', {
     title: 'Backtest strategies', description: 'Lists the strategies that can be backtested, with their parameters, defaults and allowed ranges.', inputSchema: {}, annotations: readOnly,
@@ -149,9 +168,6 @@ export function createMcpServer() {
     inputSchema: { symbol: z.string(), days: z.number().int().min(60).max(2500).default(500) }, annotations: readOnly,
   }, wrap(({ symbol, days }) => compareStrategies({ symbol, days })));
 
-  const universe = z.union([z.enum(['large_caps', 'sector_etfs', 'watchlist']), z.array(z.string())]).default('large_caps')
-    .describe('large_caps (~100 big US stocks), sector_etfs, watchlist, or a list of symbols');
-  const query = z.string().describe('Conditions joined by AND, e.g. "rsi_14 < 30 AND above_sma_200 AND return_20d > -15". Call list_screener_fields for fields.');
 
   server.registerTool('list_screener_fields', {
     title: 'Screener fields', description: 'Fields and universes available to scan_stocks and backtest_scan.', inputSchema: {}, annotations: readOnly,

@@ -35,7 +35,7 @@ npm test                    # runs the test suite offline
 The MCP server exposes these tools: `get_account`, `get_positions`, `get_orders`,
 `get_quote`, `get_price_history`, `get_news`, `get_market_trends`, `analyze_stock`,
 `get_trade_signals`, `place_order`, `cancel_order`, `get_bot_status`, `set_bot_enabled`,
-`run_bot_cycle`, `get_activity`, `list_backtest_strategies`, `run_backtest`, `compare_strategies`, `list_screener_fields`, `scan_stocks`, `backtest_scan`.
+`run_bot_cycle`, `set_bot_strategy`, `get_activity`, `list_backtest_strategies`, `run_backtest`, `compare_strategies`, `list_screener_fields`, `scan_stocks`, `backtest_scan`.
 
 **Claude Code / Claude Desktop on your computer (stdio):**
 
@@ -132,6 +132,13 @@ point-in-time data source (e.g. Tickerbot) would remove that bias.
 Toggle the bot on the site, via Claude (`set_bot_enabled`), or with `AUTO_TRADE=true`.
 Every `BOT_INTERVAL_MINUTES` while the market is open it buys watchlist names with a buy
 signal it doesn't hold and sells holdings with a sell signal.
+
+**Trading a screen instead of news signals.** In the screener panel, build a screen,
+backtest it, then press **Let the bot trade this screen**. The bot then holds the top N
+matches in equal dollar amounts (your budget ÷ N, each capped by `MAX_POSITION_USD`),
+sells picks that drop out, and rebalances on the schedule you chose. It only ever sells
+stocks it bought itself, so anything else in the account is left alone. Claude can do the
+same with `set_bot_strategy`, and "Switch back to news signals" on the site undoes it.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |

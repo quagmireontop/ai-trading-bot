@@ -6,7 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { config, demoMode, ROOT } from './config.js';
 import * as broker from './broker.js';
 import { getNews } from './news.js';
-import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, runBotCycle, startScheduler } from './strategy.js';
+import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, setBotStrategy, runBotCycle, startScheduler } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
 import { createMcpServer } from './tools.js';
 import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
@@ -66,6 +66,7 @@ api.delete('/orders/:id', route(async (r) => {
 }));
 api.post('/bot', route((r) => setBotEnabled(!!r.body.enabled, 'website')));
 api.post('/bot/run', route(() => runBotCycle('website')));
+api.post('/bot/strategy', route((r) => setBotStrategy(r.body, 'website')));
 app.use('/api', api);
 
 // Remote MCP endpoint (stateless Streamable HTTP). Add https://<your-site>/mcp as a
