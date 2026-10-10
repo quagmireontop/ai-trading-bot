@@ -6,7 +6,7 @@ import { getBrokerNews } from './broker.js';
 import { scoreArticle } from './trends.js';
 
 export const FEEDS = [
-  { name: 'Yahoo Finance', category: 'markets', url: 'https://finance.yahoo.com/news/rssindex' },
+  { name: 'Yahoo Finance', category: 'markets', url: `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${config.bot.watchlist.join(',')}&region=US&lang=en-US` },
   { name: 'CNBC Top News', category: 'markets', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114' },
   { name: 'CNBC Finance', category: 'markets', url: 'https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664' },
   { name: 'MarketWatch', category: 'markets', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories' },
