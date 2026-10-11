@@ -197,7 +197,7 @@ export async function runBotCycle(source = 'bot', { force = false } = {}) {
     if (screenResult.rebalanced) update.lastRebalance = new Date().toISOString();
   }
   write('bot', { ...latest, ...update });
-  logActivity(source, 'bot-cycle', { mode, ordersPlaced: actions.filter((a) => a.orderId).length, marketOpen: clock.isOpen });
+  logActivity(source, 'bot-cycle', { mode, ordersPlaced: actions.filter((a) => a.orderId).length, marketOpen: clock.isOpen, errors: actions.filter((a) => a.error).map((a) => `${a.symbol}: ${a.error}`) });
   return { ranAt: new Date().toISOString(), mode, marketOpen: clock.isOpen, actions, ...(mode === 'signals' ? { signals } : { screen: screenResult }) };
 }
 

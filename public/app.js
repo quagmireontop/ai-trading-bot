@@ -361,6 +361,21 @@ $('#scNow').addEventListener('click', async (e) => {
   } finally { e.target.disabled = false; }
 });
 
+async function loadNotify() {
+  const n = await api('/notify');
+  $('#notifyToggle').checked = n.enabled;
+  $('#notifyTopic').textContent = n.topic;
+}
+$('#notifyToggle').addEventListener('change', async (e) => {
+  try { await api('/notify', { method: 'POST', body: { enabled: e.target.checked } }); $('#notifyMsg').textContent = e.target.checked ? 'Phone alerts are on.' : 'Phone alerts are off.'; }
+  catch (err) { e.target.checked = !e.target.checked; $('#notifyMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`; }
+});
+$('#notifyTest').addEventListener('click', async () => {
+  $('#notifyMsg').textContent = 'Sending…';
+  try { await api('/notify/test', { method: 'POST' }); $('#notifyMsg').textContent = 'Sent. It should show up on your phone in a few seconds.'; }
+  catch (err) { $('#notifyMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`; }
+});
+$('#notifyTopic').onclick = () => { navigator.clipboard?.writeText($('#notifyTopic').textContent); $('#notifyMsg').textContent = 'Topic copied.'; };
 $('#mcpUrl').onclick = () => navigator.clipboard?.writeText($('#mcpUrl').textContent);
 const safe = (fn) => fn().catch((e) => console.error(e));
 function refreshPortfolio() {
@@ -378,6 +393,7 @@ refreshPortfolio();
 refreshNews();
 safe(loadStrategies);
 safe(loadScreenerFields);
+safe(loadNotify);
 setInterval(refreshPortfolio, 30000);
 setInterval(refreshNews, 5 * 60000);
 

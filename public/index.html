@@ -145,7 +145,19 @@
         <div id="newsErrors" class="muted small"></div>
       </section>
 
-      <section class="card">
+      <section class="card" id="alerts">
+        <div class="card-head"><h2>Phone alerts</h2><label class="switch" title="Send phone alerts"><input type="checkbox" id="notifyToggle"><span></span></label></div>
+        <p class="small">Get a buzz on your phone whenever the bot, Claude or this page places a trade, the bot hits an error, or the bot is switched on or off.</p>
+        <ol class="small steps">
+          <li>Install the free <strong>ntfy</strong> app (App Store or Google Play).</li>
+          <li>Tap <strong>+</strong>, then subscribe to this topic: <code id="notifyTopic" class="copy" title="Click to copy">…</code></li>
+          <li>Turn on the switch above, then <button type="button" id="notifyTest" class="link">send a test</button>.</li>
+        </ol>
+        <div id="notifyMsg" class="small"></div>
+        <p class="muted small">Keep the topic name private: anyone who knows it can read your alerts.</p>
+      </section>
+
+      <section class="card span3">
         <div class="card-head"><h2>Connect Claude</h2></div>
         <p class="small">Claude can read news, check signals and place paper trades with the same tools this page uses. Everything it does shows up in Activity.</p>
         <div id="localMcp">

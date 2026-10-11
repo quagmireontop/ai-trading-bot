@@ -9,6 +9,7 @@ import { getNews } from './news.js';
 import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, setBotStrategy, runBotCycle, startScheduler } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
 import { createMcpServer } from './tools.js';
+import { notifySettings, setNotifyEnabled, sendPush, formatActivity } from './notify.js';
 import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
 import { scan, backtestScan, listFields } from './screener.js';
 import { loginEnabled, requireAuth, requirePageAuth, handleLogin, handleLogout, mcpAllowed } from './auth.js';
@@ -67,6 +68,13 @@ api.delete('/orders/:id', route(async (r) => {
 api.post('/bot', route((r) => setBotEnabled(!!r.body.enabled, 'website')));
 api.post('/bot/run', route(() => runBotCycle('website')));
 api.post('/bot/strategy', route((r) => setBotStrategy(r.body, 'website')));
+api.get('/notify', route(() => notifySettings()));
+api.post('/notify', route((r) => setNotifyEnabled(!!r.body.enabled)));
+api.post('/notify/test', route(async () => {
+  if (!notifySettings().enabled) throw new Error('Turn phone alerts on first');
+  await sendPush(formatActivity({ action: 'test' }));
+  return { sent: true };
+}));
 app.use('/api', api);
 
 // Remote MCP endpoint (stateless Streamable HTTP). Add https://<your-site>/mcp as a

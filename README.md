@@ -76,6 +76,20 @@ The repo includes a `Dockerfile` and `railway.json`, so it deploys to Railway as
 Without `DASHBOARD_PASSWORD` set, anyone with the link could see the account and trade,
 so never deploy without it.
 
+## Phone alerts
+
+The site can push a notification to your phone for every trade (bot, Claude or the site),
+bot errors, and the bot being switched on or off. It uses [ntfy](https://ntfy.sh), which is
+free and needs no account:
+
+1. Install the **ntfy** app on your phone.
+2. On the site, find the **Phone alerts** card and copy the topic name (it's random and
+   private). In the app, tap **+** and subscribe to it.
+3. Turn on the card's switch and press **send a test**.
+
+Optional variables: `NTFY_TOPIC` to pick your own topic (this also turns alerts on),
+`NTFY_SERVER` for a self-hosted ntfy, `NTFY_TOKEN` for a protected topic.
+
 ## News sources
 
 Free RSS: Yahoo Finance, CNBC (top, finance, world), MarketWatch, NYT (business, world),

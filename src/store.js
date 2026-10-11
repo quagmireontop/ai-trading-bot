@@ -26,6 +26,7 @@ export function logActivity(source, action, details = {}) {
   const entry = { time: new Date().toISOString(), source, action, ...details };
   log.unshift(entry);
   write('activity', log.slice(0, 500));
+  import('./notify.js').then((m) => m.notifyActivity(entry)).catch(() => {});
   return entry;
 }
 
