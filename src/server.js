@@ -6,7 +6,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { config, demoMode, ROOT } from './config.js';
 import * as broker from './broker.js';
 import { getNews } from './news.js';
-import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, setBotStrategy, runBotCycle, startScheduler } from './strategy.js';
+import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, setBotStrategy, setBotRisk, runBotCycle, startScheduler } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
 import { createMcpServer } from './tools.js';
 import { notifySettings, setNotifyEnabled, sendPush, formatActivity } from './notify.js';
@@ -68,6 +68,7 @@ api.delete('/orders/:id', route(async (r) => {
 api.post('/bot', route((r) => setBotEnabled(!!r.body.enabled, 'website')));
 api.post('/bot/run', route(() => runBotCycle('website')));
 api.post('/bot/strategy', route((r) => setBotStrategy(r.body, 'website')));
+api.post('/bot/risk', route((r) => setBotRisk(r.body, 'website')));
 api.get('/notify', route(() => notifySettings()));
 api.post('/notify', route((r) => setNotifyEnabled(!!r.body.enabled)));
 api.post('/notify/test', route(async () => {

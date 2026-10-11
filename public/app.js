@@ -43,7 +43,30 @@ async function loadStatus() {
   $('#botToggle').checked = s.bot.enabled;
   $('#botToggle').title = `${s.bot.mode === 'screen' ? 'Trades your screen' : 'Trades news signals'} · checks every ${s.bot.intervalMinutes} min · max $${s.bot.maxPositionUsd}/position · ${s.bot.ordersToday}/${s.bot.maxOrdersPerDay} orders today`;
   renderBotMode(s.bot);
+  renderRisk(s.bot.risk);
 }
+
+let riskDirty = false;
+function renderRisk(r) {
+  const f = $('#riskForm');
+  if (riskDirty || f.contains(document.activeElement)) return; // don't clobber edits in progress
+  f.enabled.checked = r.enabled;
+  f.stopLossPct.value = r.stopLossPct;
+  f.takeProfitPct.value = r.takeProfitPct;
+  f.scope.value = r.scope;
+  $('#riskMsg').textContent = r.enabled ? `Checked every 5 minutes while the bot is on and the market is open. 0 turns one side off.` : 'Off: the bot only sells on its strategy.';
+}
+$('#riskForm').addEventListener('input', () => { riskDirty = true; });
+$('#riskForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    const b = await api('/bot/risk', { method: 'POST', body: { enabled: f.enabled.checked, stopLossPct: f.stopLossPct.value, takeProfitPct: f.takeProfitPct.value, scope: f.scope.value } });
+    riskDirty = false; renderRisk(b.risk);
+    $('#riskMsg').textContent = 'Saved.';
+    loadActivity();
+  } catch (err) { $('#riskMsg').innerHTML = `<span class="neg">${esc(err.message)}</span>`; }
+});
 
 function renderBotMode(b) {
   const on = b.enabled ? '' : ' <span class="muted">(bot is off: turn on the switch at the top to start)</span>';
@@ -133,6 +156,7 @@ async function loadActivity() {
     let what = a.action;
     if (a.action === 'order') what = `${a.side} ${a.symbol} ${a.qty ? `${+(+a.qty).toFixed(4)} sh` : usd(a.notional)}`;
     if (a.action === 'bot-strategy') what = a.mode === 'screen' ? `bot now trades screen: ${a.q} (top ${a.top})` : 'bot now trades news signals';
+    if (a.action === 'bot-risk') what = a.enabled ? `stop-loss ${a.stopLossPct || 'off'}${a.stopLossPct ? '%' : ''} · take-profit ${a.takeProfitPct || 'off'}${a.takeProfitPct ? '%' : ''} · ${a.scope === 'all' ? 'all positions' : "bot's trades"}` : 'stop-loss and take-profit off';
     if (a.action === 'bot-cycle') what = `bot run · ${a.ordersPlaced} order(s)${a.marketOpen === false ? ' · market closed' : ''}`;
     return `<li><span><span class="src ${esc(a.source)}">${esc(label[a.source] || a.source)}</span> <span class="muted">${ago(a.time)}</span></span>
       <span>${esc(what)}</span>${a.reason ? `<span class="muted">${esc(a.reason)}</span>` : ''}${a.error ? `<span class="neg">${esc(a.error)}</span>` : ''}</li>`;

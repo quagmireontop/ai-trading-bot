@@ -4,7 +4,7 @@ import { config } from './config.js';
 import * as broker from './broker.js';
 import { fetchAllNews } from './news.js';
 import { summarizeTrends } from './trends.js';
-import { read, write, logActivity } from './store.js';
+import { read, write, logActivity, getActivity } from './store.js';
 import { scan, parseQuery } from './screener.js';
 
 const clamp = (x, lo = -1, hi = 1) => Math.max(lo, Math.min(hi, x));
@@ -52,6 +52,24 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 const DEFAULT_SCREEN = { universe: 'large_caps', order: 'return_20d', dir: 'desc', top: 5, rebalanceDays: 21 };
 const DEFAULT_BUDGET = 10000;
+const RISK_DEFAULTS = { enabled: true, stopLossPct: 8, takeProfitPct: 20, scope: 'bot', cooldownDays: 5 };
+const RISK_CHECK_MINUTES = 5;
+const riskSettings = (s) => ({ ...RISK_DEFAULTS, ...(s.risk || {}) });
+const addDays = (days) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+
+// Symbols the bot bought itself. Older installs didn't record this, so seed it
+// from the bot's own orders in the activity log plus the screen's holdings.
+function ownedSet(s) {
+  if (Array.isArray(s.owned)) return new Set(s.owned);
+  const owned = new Set(s.managed || []);
+  for (const e of getActivity(500).reverse()) {
+    if (e.source !== 'bot' || e.action !== 'order') continue;
+    if (e.side === 'buy') owned.add(e.symbol); else owned.delete(e.symbol);
+  }
+  return owned;
+}
+// After a stop-loss or take-profit, don't buy the same stock straight back.
+const coolingDown = (s, sym) => (s.cooldown?.[sym] || '') >= today();
 // Trading days -> calendar days, roughly (5 trading days per week).
 const nextRebalance = (s) => {
   if (!s.lastRebalance) return null;
@@ -71,6 +89,7 @@ export function botStatus() {
     watchlist: config.bot.watchlist,
     lastRun: s.lastRun || null,
     ordersToday: s.day === today() ? s.ordersToday : 0,
+    risk: { ...riskSettings(s), lastCheck: s.lastRiskCheck || null },
     ...(mode === 'screen' && {
       screen: s.screen,
       budget: s.budget ?? DEFAULT_BUDGET,
@@ -130,18 +149,21 @@ async function runScreenCycle(source, state, held, actions, { force = false } = 
       const o = await broker.placeOrder({ symbol: sym, side: 'sell', qty });
       state.ordersToday++;
       managed.delete(sym);
+      state.owned.delete(sym);
       actions.push({ symbol: sym, side: 'sell', orderId: o.id, note: 'dropped out of the screen' });
       logActivity(source, 'order', { symbol: sym, side: 'sell', qty, reason: `${reason}; no longer a pick` });
     } catch (e) { actions.push({ symbol: sym, error: e.message }); }
   }
   for (const sym of picks) {
     if (held.has(sym)) { if (!managed.has(sym)) actions.push({ symbol: sym, note: 'already held outside the bot; skipped' }); continue; }
+    if (coolingDown(state, sym)) { actions.push({ symbol: sym, note: `sold by stop-loss/take-profit recently; not buying back until after ${state.cooldown[sym]}` }); continue; }
     if (state.ordersToday >= config.bot.maxOrdersPerDay) { actions.push({ note: 'Daily order limit reached.' }); break; }
     try {
       const notional = Math.floor(s.perPickUsd);
       const o = await broker.placeOrder({ symbol: sym, side: 'buy', notional });
       state.ordersToday++;
       managed.add(sym);
+      state.owned.add(sym);
       actions.push({ symbol: sym, side: 'buy', orderId: o.id, notional });
       logActivity(source, 'order', { symbol: sym, side: 'buy', notional, reason });
     } catch (e) { actions.push({ symbol: sym, error: e.message }); }
@@ -154,14 +176,19 @@ async function runScreenCycle(source, state, held, actions, { force = false } = 
 export async function runBotCycle(source = 'bot', { force = false } = {}) {
   const clock = await broker.getMarketClock().catch(() => ({ isOpen: false }));
   const mode = botStatus().mode;
+  // Protect what's held before buying anything new.
+  const actions = [];
+  if (clock.isOpen) {
+    try { actions.push(...(await checkRisk(source, { clock })).actions); } catch (e) { actions.push({ symbol: 'stop-loss check', error: e.message }); }
+  }
   const signals = mode === 'signals' ? await getSignals() : [];
   const positions = await broker.getPositions();
   const held = new Map(positions.map((p) => [p.symbol, p]));
-  const actions = [];
   let screenResult = null;
 
   const state = read('bot', {});
   if (state.day !== today()) Object.assign(state, { day: today(), ordersToday: 0 });
+  state.owned = ownedSet(state);
 
   if (!clock.isOpen) {
     actions.push({ note: 'Market is closed; no orders placed.' });
@@ -171,16 +198,18 @@ export async function runBotCycle(source = 'bot', { force = false } = {}) {
     for (const sig of signals) {
       if (state.ordersToday >= config.bot.maxOrdersPerDay) { actions.push({ note: 'Daily order limit reached.' }); break; }
       try {
-        if (sig.action === 'buy' && !held.has(sig.symbol)) {
+        if (sig.action === 'buy' && !held.has(sig.symbol) && !coolingDown(state, sig.symbol)) {
           const notional = Math.floor(config.bot.maxPositionUsd * Math.min(1, sig.score));
           const order = await broker.placeOrder({ symbol: sig.symbol, side: 'buy', notional });
           state.ordersToday++;
+          state.owned.add(sig.symbol);
           actions.push({ symbol: sig.symbol, side: 'buy', score: sig.score, orderId: order.id });
           logActivity(source, 'order', { symbol: sig.symbol, side: 'buy', notional, reason: sig.reasons.join('; ') });
         } else if (sig.action === 'sell' && held.has(sig.symbol)) {
           const qty = held.get(sig.symbol).qty;
           const order = await broker.placeOrder({ symbol: sig.symbol, side: 'sell', qty });
           state.ordersToday++;
+          state.owned.delete(sig.symbol);
           actions.push({ symbol: sig.symbol, side: 'sell', score: sig.score, orderId: order.id });
           logActivity(source, 'order', { symbol: sig.symbol, side: 'sell', qty, reason: sig.reasons.join('; ') });
         }
@@ -191,7 +220,7 @@ export async function runBotCycle(source = 'bot', { force = false } = {}) {
   }
   // Re-read so a concurrent on/off toggle or strategy change is not overwritten.
   const latest = read('bot', {});
-  const update = { day: state.day, ordersToday: state.ordersToday, lastRun: new Date().toISOString() };
+  const update = { day: state.day, ordersToday: state.ordersToday, lastRun: new Date().toISOString(), owned: [...state.owned] };
   if (screenResult?.managed && latest.mode === 'screen') {
     update.managed = screenResult.managed;
     if (screenResult.rebalanced) update.lastRebalance = new Date().toISOString();
@@ -199,6 +228,65 @@ export async function runBotCycle(source = 'bot', { force = false } = {}) {
   write('bot', { ...latest, ...update });
   logActivity(source, 'bot-cycle', { mode, ordersPlaced: actions.filter((a) => a.orderId).length, marketOpen: clock.isOpen, errors: actions.filter((a) => a.error).map((a) => `${a.symbol}: ${a.error}`) });
   return { ranAt: new Date().toISOString(), mode, marketOpen: clock.isOpen, actions, ...(mode === 'signals' ? { signals } : { screen: screenResult }) };
+}
+
+// Stop-loss / take-profit: sell a whole position once its gain or loss since
+// purchase crosses the limits. These protective sells don't count toward the
+// daily order cap. By default only stocks the bot bought are watched.
+export async function checkRisk(source = 'bot', { clock } = {}) {
+  const s = read('bot', {});
+  const risk = riskSettings(s);
+  const actions = [];
+  if (!risk.enabled || (!risk.stopLossPct && !risk.takeProfitPct)) return { actions };
+  clock ??= await broker.getMarketClock().catch(() => ({ isOpen: false }));
+  if (!clock.isOpen) { write('bot', { ...read('bot', {}), lastRiskCheck: new Date().toISOString() }); return { actions }; }
+  const owned = ownedSet(s);
+  const sold = [];
+  for (const p of await broker.getPositions()) {
+    if (risk.scope === 'bot' && !owned.has(p.symbol)) continue;
+    if (p.qty <= 0) continue; // never touch shorts
+    const pct = p.unrealizedPlPct;
+    let why = null;
+    if (risk.stopLossPct && pct <= -risk.stopLossPct) why = `stop-loss: down ${Math.abs(pct).toFixed(1)}% (limit ${risk.stopLossPct}%)`;
+    else if (risk.takeProfitPct && pct >= risk.takeProfitPct) why = `take-profit: up ${pct.toFixed(1)}% (target ${risk.takeProfitPct}%)`;
+    if (!why) continue;
+    try {
+      const o = await broker.placeOrder({ symbol: p.symbol, side: 'sell', qty: p.qty });
+      sold.push(p.symbol);
+      actions.push({ symbol: p.symbol, side: 'sell', orderId: o.id, note: why });
+      logActivity(source, 'order', { symbol: p.symbol, side: 'sell', qty: p.qty, reason: why });
+    } catch (e) { actions.push({ symbol: p.symbol, error: `${why} sell failed: ${e.message}` }); }
+  }
+  const latest = read('bot', {});
+  const cooldown = Object.fromEntries(Object.entries(latest.cooldown || {}).filter(([, d]) => d >= today()));
+  for (const sym of sold) { owned.delete(sym); cooldown[sym] = addDays(risk.cooldownDays); }
+  write('bot', {
+    ...latest, owned: [...owned], cooldown, lastRiskCheck: new Date().toISOString(),
+    ...(latest.managed && { managed: latest.managed.filter((m) => !sold.includes(m)) }),
+  });
+  if (actions.some((a) => a.error)) logActivity(source, 'error', { error: actions.filter((a) => a.error).map((a) => `${a.symbol}: ${a.error}`).join('; ') });
+  return { actions };
+}
+
+export function setBotRisk({ enabled, stopLossPct, takeProfitPct, scope }, source) {
+  const s = read('bot', {});
+  const risk = riskSettings(s);
+  const pctOrOff = (v, max, name) => {
+    if (v === undefined || v === null || v === '') return undefined;
+    const n = +v;
+    if (!Number.isFinite(n) || n < 0 || n > max) throw new Error(`${name} must be between 0 (off) and ${max}`);
+    return n;
+  };
+  const next = {
+    ...risk,
+    ...(enabled !== undefined && { enabled: !!enabled }),
+    ...(pctOrOff(stopLossPct, 90, 'Stop-loss') !== undefined && { stopLossPct: +stopLossPct }),
+    ...(pctOrOff(takeProfitPct, 1000, 'Take-profit') !== undefined && { takeProfitPct: +takeProfitPct }),
+    ...(scope && { scope: scope === 'all' ? 'all' : 'bot' }),
+  };
+  write('bot', { ...s, risk: next });
+  logActivity(source, 'bot-risk', { enabled: next.enabled, stopLossPct: next.stopLossPct, takeProfitPct: next.takeProfitPct, scope: next.scope });
+  return botStatus();
 }
 
 export function setBotEnabled(enabled, source) {
@@ -210,12 +298,15 @@ export function setBotEnabled(enabled, source) {
 // Called once by the website server: checks every minute whether a cycle is due.
 export function startScheduler() {
   let running = false;
+  const since = (t) => (t ? Date.now() - new Date(t).getTime() : Infinity);
   const tick = async () => {
     const s = botStatus();
-    const due = !s.lastRun || Date.now() - new Date(s.lastRun).getTime() >= s.intervalMinutes * 60000;
-    if (!s.enabled || !due || running) return;
+    if (!s.enabled || running) return;
+    const cycleDue = since(s.lastRun) >= s.intervalMinutes * 60000;
+    const riskDue = s.risk.enabled && since(s.risk.lastCheck) >= RISK_CHECK_MINUTES * 60000;
+    if (!cycleDue && !riskDue) return;
     running = true;
-    try { await runBotCycle('bot'); } catch (e) { logActivity('bot', 'error', { error: e.message }); } finally { running = false; }
+    try { await (cycleDue ? runBotCycle('bot') : checkRisk('bot')); } catch (e) { logActivity('bot', 'error', { error: e.message }); } finally { running = false; }
   };
   setInterval(tick, 60000).unref();
   setTimeout(tick, 5000).unref();

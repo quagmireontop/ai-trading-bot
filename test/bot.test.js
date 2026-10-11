@@ -45,3 +45,38 @@ test('screen mode buys the top picks, then holds until the next rebalance', asyn
 
   assert.equal(setBotStrategy({ mode: 'signals' }, 'test').mode, 'signals');
 });
+
+test('stop-loss and take-profit sell only the bot\'s own losers and winners', async () => {
+  const st = await import('../src/store.js');
+  // Fake prices: bot owns NVDA (down 10%) and AAPL (up 25%) and MSFT (up 2%); you own XOM (down 50%).
+  const positions = [
+    { symbol: 'NVDA', qty: 2, unrealizedPlPct: -10 },
+    { symbol: 'AAPL', qty: 3, unrealizedPlPct: 25 },
+    { symbol: 'MSFT', qty: 1, unrealizedPlPct: 2 },
+    { symbol: 'XOM', qty: 4, unrealizedPlPct: -50 },
+  ];
+  st.write('bot', { ...st.read('bot', {}), owned: ['NVDA', 'AAPL', 'MSFT'], risk: undefined });
+  const { checkRisk, setBotRisk } = await import('../src/strategy.js');
+  const demo = { cash: 0, orders: [], positions: {} };
+  for (const p of positions) demo.positions[p.symbol] = { qty: p.qty, avgPrice: 100 };
+  st.write('demo-portfolio', demo);
+  const prices = Object.fromEntries((await broker.getPositions()).map((p) => [p.symbol, p.price]));
+  // Set average prices so the current price gives the target gain/loss.
+  for (const p of positions) demo.positions[p.symbol].avgPrice = prices[p.symbol] / (1 + p.unrealizedPlPct / 100);
+  st.write('demo-portfolio', demo);
+
+  const r = await checkRisk('test', { clock: { isOpen: true } });
+  const sold = r.actions.filter((a) => a.side === 'sell').map((a) => a.symbol).sort();
+  assert.deepEqual(sold, ['AAPL', 'NVDA']);
+  assert.match(r.actions.find((a) => a.symbol === 'NVDA').note, /stop-loss: down 10/);
+  assert.match(r.actions.find((a) => a.symbol === 'AAPL').note, /take-profit: up 25/);
+  const s = st.read('bot', {});
+  assert.deepEqual(s.owned, ['MSFT']);
+  assert.ok(s.cooldown.NVDA > new Date().toISOString().slice(0, 10));
+
+  // Watching every position catches XOM too.
+  assert.throws(() => setBotRisk({ stopLossPct: 150 }, 'test'), /between 0/);
+  setBotRisk({ scope: 'all' }, 'test');
+  const r2 = await checkRisk('test', { clock: { isOpen: true } });
+  assert.deepEqual(r2.actions.map((a) => a.symbol), ['XOM']);
+});

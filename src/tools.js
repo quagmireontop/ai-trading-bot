@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { demoMode } from './config.js';
 import * as broker from './broker.js';
 import { getNews } from './news.js';
-import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, setBotStrategy, runBotCycle } from './strategy.js';
+import { getTrends, analyzeSymbol, getSignals, botStatus, setBotEnabled, setBotStrategy, setBotRisk, runBotCycle } from './strategy.js';
 import { logActivity, getActivity } from './store.js';
 import { runBacktest, compareStrategies, listStrategies } from './backtest.js';
 import { scan, backtestScan, listFields } from './screener.js';
@@ -125,6 +125,17 @@ export function createMcpServer() {
     title: 'Run bot once', description: 'Runs one bot cycle now. In signals mode it trades the watchlist on news + momentum; in screen mode it rebalances into the screen\'s top picks when a rebalance is due. Paper orders only, within the safety limits, and only while the market is open.',
     inputSchema: { rebalance_now: z.boolean().default(false).describe('Screen mode only: rebalance now even if the next scheduled rebalance is later') },
   }, wrap(({ rebalance_now }) => runBotCycle(SOURCE, { force: rebalance_now })));
+
+  server.registerTool('set_bot_risk', {
+    title: 'Set stop-loss / take-profit',
+    description: 'Changes the bot\'s stop-loss and take-profit: it sells a whole position once it is down stop_loss_pct or up take_profit_pct from the purchase price (checked every 5 minutes while the bot is on and the market is open). 0 turns that side off. scope "bot" (default) watches only stocks the bot bought; "all" watches every position in the account. Confirm with the user before changing.',
+    inputSchema: {
+      enabled: z.boolean().optional(),
+      stop_loss_pct: z.number().min(0).max(90).optional(),
+      take_profit_pct: z.number().min(0).max(1000).optional(),
+      scope: z.enum(['bot', 'all']).optional(),
+    },
+  }, wrap(({ stop_loss_pct, take_profit_pct, ...args }) => setBotRisk({ ...args, stopLossPct: stop_loss_pct, takeProfitPct: take_profit_pct }, SOURCE)));
 
   server.registerTool('set_bot_strategy', {
     title: 'Set what the bot trades',

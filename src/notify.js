@@ -42,6 +42,8 @@ export function formatActivity(e) {
     case 'bot-disabled': return { title: 'Bot turned off', body: `Switched off from ${who}.`, tags: 'robot' };
     case 'bot-strategy':
       return { title: 'Bot strategy changed', body: e.mode === 'screen' ? `Now trading the screen: ${e.q} (top ${e.top})` : 'Now trading news signals', tags: 'robot' };
+    case 'bot-risk':
+      return { title: 'Stop-loss settings changed', body: e.enabled ? `Stop-loss ${e.stopLossPct ? `${e.stopLossPct}%` : 'off'}, take-profit ${e.takeProfitPct ? `${e.takeProfitPct}%` : 'off'}, watching ${e.scope === 'all' ? 'every position' : "the bot's own trades"}` : 'Stop-loss and take-profit are off', tags: 'shield' };
     case 'test': return { title: 'Test notification', body: 'Phone alerts from your trading bot are working.', tags: 'white_check_mark' };
     default: return null;
   }
